@@ -1,5 +1,8 @@
 # -*- coding: utf-8 -*-
 
+
+# http://www.twse.com.tw/exchangeReport/MI_INDEX?response=html&date=20170524&type=ALLBUT0999
+
 import os
 import re
 import sys
