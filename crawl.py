@@ -14,6 +14,12 @@ import requests
 import argparse
 from datetime import datetime, timedelta
 
+# +
+            
+import numpy as np
+import pandas as pd
+# -
+
 from os import mkdir
 from os.path import isdir
 
@@ -56,11 +62,14 @@ class Crawler():
             return
 
         content = page.json()
-
+        
         # For compatible with original data
         date_str_mingguo = '{0}/{1:02d}/{2:02d}'.format(date_tuple[0] - 1911, date_tuple[1], date_tuple[2])
 
-        for data in content['data5']:
+        
+        
+        for data in content['data9']:  # json data key
+            print(type(data), len(data))
             sign = '-' if data[9].find('green') > 0 else ''
             row = self._clean_row([
                 date_str_mingguo, # 日期
@@ -75,11 +84,75 @@ class Crawler():
             ])
 
             self._record(data[0].strip(), row)
+            
+    def get_tse_data(self, date_tuple):
+        
+        date_str = '{0}{1:02d}{2:02d}'.format(date_tuple[0], date_tuple[1], date_tuple[2])
+        url = 'http://www.twse.com.tw/exchangeReport/MI_INDEX'
+
+        query_params = {
+            'date': date_str,
+            'response': 'json',
+            'type': 'ALL',
+            '_': str(round(time.time() * 1000) - 500)
+        }
+
+        # Get json data
+        page = requests.get(url, params=query_params)
+
+        if not page.ok:
+            logging.error("Can not get TSE data at {}".format(date_str))
+            return
+
+        content = page.json()
+
+        tse_data = pd.DataFrame(content["data9"], 
+                                columns=["證券代號", 
+                                                "證券名稱", 
+                                                "成交股數",
+                                                "成交筆數",
+                                                "成交金額",
+                                                "開盤價",
+                                                "最高價",
+                                                "最低價",
+                                                "收盤價",
+                                                "漲跌(+/-)",
+                                                "漲跌價差",
+                                                "最後揭示買價",
+                                                "最後揭示買量",
+                                                "最後揭示賣價",
+                                                "最後揭示賣量",
+                                                "本益比"])
+
+        # 跌 => 漲跌價差補上負號
+        diff_prices = tse_data["漲跌價差"].values
+        for idx, up_down in enumerate(tse_data["漲跌(+/-)"].values):
+            if re.search(".*color.green.*", up_down):
+                diff_prices[idx] = "-" + diff_prices[idx]
+
+        tse_data.drop(columns=["漲跌價差", "漲跌(+/-)"], inplace=True)
+        tse_data["漲跌價差"] = diff_prices
+        
+        # string to float, (1) "," to ""; (2) "--" to -9999
+        for col in tse_data.columns[2:]:
+            try:
+                tse_data[col] = [re.sub(",", "", s) for s in tse_data[col].values]
+                tse_data[col] = [re.sub("--", "-9999", s) for s in tse_data[col].values]
+                tse_data.astype({col: "float"})
+            except Exception as e:
+                print(col, e)
+        
+        return tse_data
 
     def _get_otc_data(self, date_tuple):
+        """
+        reference url
+            https://www.tpex.org.tw/web/stock/aftertrading/daily_close_quotes/stk_quote.php?l=zh-tw&d=110/01/09
+        """
         date_str = '{0}/{1:02d}/{2:02d}'.format(date_tuple[0] - 1911, date_tuple[1], date_tuple[2])
         ttime = str(int(time.time()*100))
         url = 'http://www.tpex.org.tw/web/stock/aftertrading/daily_close_quotes/stk_quote_result.php?l=zh-tw&d={}&_={}'.format(date_str, ttime)
+        print(url)
         page = requests.get(url)
 
         if not page.ok:
@@ -87,7 +160,7 @@ class Crawler():
             return
 
         result = page.json()
-
+        
         if result['reportDate'] != date_str:
             logging.error("Get error date OTC data at {}".format(date_str))
             return
@@ -106,7 +179,40 @@ class Crawler():
                     tr[10] # 成交筆數
                 ])
                 self._record(tr[0], row)
+                
+    def get_otc_data(self, date_tuple):
+        """
+        reference url
+            https://www.tpex.org.tw/web/stock/aftertrading/daily_close_quotes/stk_quote.php?l=zh-tw&d=110/01/09
+        """
+        date_str = '{0}/{1:02d}/{2:02d}'.format(date_tuple[0] - 1911, date_tuple[1], date_tuple[2])
+        ttime = str(int(time.time()*100))
+        url = 'http://www.tpex.org.tw/web/stock/aftertrading/daily_close_quotes/stk_quote_result.php?l=zh-tw&d={}&_={}'.format(date_str, ttime)
+        print(url)
+        page = requests.get(url)
 
+        if not page.ok:
+            logging.error("Can not get OTC data at {}".format(date_str))
+            return
+
+        result = page.json()
+        
+        if result['reportDate'] != date_str:
+            logging.error("Get error date OTC data at {}".format(date_str))
+            return
+            
+        cols = ["代號", "名稱", "收盤", "漲跌", "開盤", "最高", "最低", "均價", "成交股數", "成交金額(元)", "成交筆數", "最後買價",
+                "最後買量(千股)", "最後賣價", "最後賣量(千股)", "發行股數", "次日參考價", "次日漲停價", "次日跌停價"]
+        
+        otc_data = pd.DataFrame(content['aaData'], columns=cols)
+
+        for col in cols[2:]:
+            print(col)
+            otc_data[col] = [re.sub(",", "", s) for s in otc_data[col].values]
+            otc_data[col] = [re.sub("---", "-9999", s) for s in otc_data[col].values]
+            otc_data.astype({col: "float"})
+        
+        return otc_data
 
     def get_data(self, date_tuple):
         print('Crawling {}'.format(date_tuple))
@@ -168,4 +274,36 @@ def main():
         crawler.get_data((first_day.year, first_day.month, first_day.day))
 
 if __name__ == '__main__':
-    main()
+#     main()
+
+    datetime.today().day
+
+    crawl = Crawler()
+#     crawl.get_data((2023, 1, 9))
+#     content = crawl.get_tse_data((2023, 1, 9))
+    content = crawl.get_otc_data((2023, 1, 9))
+
+    content
+
+    cols = ["代號", "名稱", "收盤", "漲跌", "開盤", "最高", "最低", "均價", "成交股數", "成交金額(元)", "成交筆數", "最後買價",
+            "最後買量(千股)", "最後賣價", "最後賣量(千股)", "發行股數", "次日參考價", "次日漲停價", "次日跌停價"]
+    otc_data = pd.DataFrame(content['aaData'], columns=cols)
+    
+
+    for col in cols[2:]:
+        print(col)
+        otc_data[col] = [re.sub(",", "", s) for s in otc_data[col].values]
+        otc_data[col] = [re.sub("---", "-9999", s) for s in otc_data[col].values]
+        otc_data.astype({col: "float"})
+
+    [i for i in content.iloc[0]]
+
+    for k, v in content.items():
+#         print(k, v[0:10], type(v))
+        print(k, type(v))
+        if isinstance(v, list):
+            print(v[0:5])
+        elif isinstance(v, dict):
+            print(v.keys())
+
+
