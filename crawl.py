@@ -1,6 +1,4 @@
 # -*- coding: utf-8 -*-
-
-
 # http://www.twse.com.tw/exchangeReport/MI_INDEX?response=html&date=20170524&type=ALLBUT0999
 
 import os
@@ -14,21 +12,20 @@ import requests
 import argparse
 from datetime import datetime, timedelta
 
-# +
-            
 import numpy as np
 import pandas as pd
-# -
 
 from os import mkdir
 from os.path import isdir
 
+# +
 class Crawler():
     def __init__(self, prefix="data"):
         ''' Make directory if not exist when initialize '''
-        if not isdir(prefix):
-            mkdir(prefix)
+
         self.prefix = prefix
+        for sub_dir in ["tse", "otc"]:
+            os.makedirs(os.path.join(self.prefix, sub_dir), exist_ok=True)
 
     def _clean_row(self, row):
         ''' Clean comma and spaces '''
@@ -188,7 +185,7 @@ class Crawler():
         date_str = '{0}/{1:02d}/{2:02d}'.format(date_tuple[0] - 1911, date_tuple[1], date_tuple[2])
         ttime = str(int(time.time()*100))
         url = 'http://www.tpex.org.tw/web/stock/aftertrading/daily_close_quotes/stk_quote_result.php?l=zh-tw&d={}&_={}'.format(date_str, ttime)
-        print(url)
+#         print(url)
         page = requests.get(url)
 
         if not page.ok:
@@ -204,20 +201,48 @@ class Crawler():
         cols = ["代號", "名稱", "收盤", "漲跌", "開盤", "最高", "最低", "均價", "成交股數", "成交金額(元)", "成交筆數", "最後買價",
                 "最後買量(千股)", "最後賣價", "最後賣量(千股)", "發行股數", "次日參考價", "次日漲停價", "次日跌停價"]
         
-        otc_data = pd.DataFrame(content['aaData'], columns=cols)
+        otc_data = pd.DataFrame(result['aaData'], columns=cols)
 
         for col in cols[2:]:
-            print(col)
+#             print(col,  otc_data[col])
             otc_data[col] = [re.sub(",", "", s) for s in otc_data[col].values]
             otc_data[col] = [re.sub("---", "-9999", s) for s in otc_data[col].values]
+            otc_data[col] = [re.sub("除息", "-9001", s) for s in otc_data[col].values]
             otc_data.astype({col: "float"})
         
         return otc_data
 
-    def get_data(self, date_tuple):
-        print('Crawling {}'.format(date_tuple))
-        self._get_tse_data(date_tuple)
-        self._get_otc_data(date_tuple)
+#     def get_data(self, date_tuple):
+#         print('Crawling {}'.format(date_tuple))
+#         self._get_tse_data(date_tuple)
+#         self._get_otc_data(date_tuple)
+        
+        
+    def get_data(self, start_date, end_date, output_dir: str = None):
+        start_date = datetime(start_date[0], start_date[1], start_date[2])
+        end_date = datetime(end_date[0], end_date[1], end_date[2])
+        current = start_date
+        while current <= end_date:
+            print(">>> {}".format(current))
+            try:
+                tse_data = self.get_tse_data(current.timetuple()[0:3])
+                tse_data.to_csv(os.path.join(self.prefix, "tse", "tse_{}.csv".format(current.strftime("%Y%m%d"))), 
+                                index=False, encoding="utf-8-sig")
+            except Exception as e:
+                print("  get tse data failed!\n  {}\n".format(e))
+            try: 
+                otc_data = self.get_otc_data(current.timetuple()[0:3])
+                otc_data.to_csv(os.path.join(self.prefix, "otc", "otc_{}.csv".format(current.strftime("%Y%m%d"))), 
+                                index=False, encoding="utf-8-sig")
+            except Exception as e:
+                print("  get otc data failed!\n {}\n".format(e))
+            current += timedelta(days=1)
+# -
+
+datetime(2021, 1, 10)
+
+current.timetuple()
+
 
 def main():
     # Set logging
@@ -273,15 +298,19 @@ def main():
     else:
         crawler.get_data((first_day.year, first_day.month, first_day.day))
 
+# !dir
+
 if __name__ == '__main__':
 #     main()
 
     datetime.today().day
 
-    crawl = Crawler()
+    crawl = Crawler("data")
 #     crawl.get_data((2023, 1, 9))
-#     content = crawl.get_tse_data((2023, 1, 9))
-    content = crawl.get_otc_data((2023, 1, 9))
+    content = crawl.get_data((2023, 4, 30), (2023, 5, 2), "d")
+#     content = crawl.get_otc_data((2023, 4, 22))
+#     content = crawl.get_tse_data((2023, 4, 25))
+#     content = crawl.get_otc_data((2023, 4, 25))
 
     content
 
@@ -305,5 +334,7 @@ if __name__ == '__main__':
             print(v[0:5])
         elif isinstance(v, dict):
             print(v.keys())
+
+
 
 
